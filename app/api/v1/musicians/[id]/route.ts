@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getMusicianPublicProfile } from "@/app/actions/discover"
+import { getMusicianPublicProfile } from "@/modules/discovery"
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getGenres } from "@/app/actions/discover"
+import { getGenres } from "@/modules/genres"
 
 export async function GET() {
   const genres = await getGenres()

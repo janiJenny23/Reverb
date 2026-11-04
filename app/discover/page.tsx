@@ -1,7 +1,9 @@
 import Image from "next/image"
 import Link from "next/link"
 import { Music2 } from "lucide-react"
-import { getFeaturedWorks, getGenres, searchWorks } from "@/app/actions/discover"
+import { getFeaturedWorks, searchWorks } from "@/modules/discovery"
+import { getDiscoverHeroImage } from "@/modules/discovery-content"
+import { getGenres } from "@/modules/genres"
 import { getMyProfile } from "@/app/actions/profile"
 import { getSessionUser } from "@/lib/session"
 import { MusicianNavigation } from "@/components/musician-navigation"
@@ -13,13 +15,14 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Pro
   const params = await searchParams
   const isSearching = Boolean(params.q || params.genre)
   const isMusician = user?.role === "MUSICIAN" || user?.role === "SUPER_ADMIN"
-  const [genres, works, featuredWorks, musicianProfile] = await Promise.all([
+  const [genres, works, featuredWorks, musicianProfile, discoverHeroImage] = await Promise.all([
     getGenres(),
     isSearching ? searchWorks(params.q ?? "", Number(params.genre) || undefined) : getFeaturedWorks(12),
     isSearching ? getFeaturedWorks(1) : Promise.resolve([]),
     isMusician ? getMyProfile() : Promise.resolve(null),
+    getDiscoverHeroImage(),
   ])
-  const heroArtwork = (isSearching ? featuredWorks : works).find((work) => work.artworkUrl)?.artworkUrl
+  const heroArtwork = discoverHeroImage ?? (isSearching ? featuredWorks : works).find((work) => work.artworkUrl)?.artworkUrl
   const profileImage = musicianProfile?.profile?.imageUrl ?? musicianProfile?.account.image ?? null
   const roleLabel = user?.role === "SUPER_ADMIN" ? "Super admin" : "Musician"
 

@@ -221,6 +221,13 @@ export async function fetchWorks(query?: string): Promise<PublicWork[]> {
   return body.data
 }
 
+export async function fetchDiscoverHeroImage(): Promise<string | null> {
+  const response = await fetch(`${API_URL}/discover/hero`)
+  if (!response.ok) throw new Error(`Unable to load Discover background (HTTP ${response.status})`)
+  const body = (await response.json()) as { data: { imageUrl: string | null } }
+  return body.data.imageUrl
+}
+
 export async function updateProfileImage(base64: string, mimeType: string) {
   const cookie = await readSessionCookie()
   if (!cookie) throw new Error("Authentication required")

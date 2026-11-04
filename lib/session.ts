@@ -1,7 +1,5 @@
 import { auth } from "@/lib/auth"
-import { db } from "@/lib/db"
-import { user } from "@/lib/db/schema"
-import { eq } from "drizzle-orm"
+import { getSessionIdentity } from "@/modules/identity"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 
@@ -41,19 +39,7 @@ export function normalizeSessionUser(input: {
 }
 
 export async function getFreshSessionUserById(userId: string): Promise<SessionUser | null> {
-  const [freshUser] = await db
-    .select({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      image: user.image,
-      banned: user.banned,
-    })
-    .from(user)
-    .where(eq(user.id, userId))
-    .limit(1)
-
+  const freshUser = await getSessionIdentity(userId)
   if (!freshUser || freshUser.banned) return null
 
   return normalizeSessionUser({

@@ -1,5 +1,5 @@
 import { Disc3 } from "lucide-react"
-import { getGenres } from "@/app/actions/discover"
+import { getGenres } from "@/modules/genres"
 import { getMyProjectsSimple } from "@/app/actions/projects"
 import { getMyProfile } from "@/app/actions/profile"
 import { MusicianNavigation } from "@/components/musician-navigation"

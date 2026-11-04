@@ -10,7 +10,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async () => {
-        // Only authenticated musicians may upload files.
+        // Only authenticated musicians and super admins may upload files.
         const user = await getSessionUser()
         if (!user || (user.role !== "MUSICIAN" && user.role !== "SUPER_ADMIN")) {
           throw new Error("Unauthorized")

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { getSessionUser, homePathForRole } from "@/lib/session"
-import { getFeaturedWorks } from "@/app/actions/discover"
+import { getFeaturedWorks } from "@/modules/discovery"
 import { Mic2, Headphones, Library, ArrowRight } from "lucide-react"
 
 export default async function HomePage() {

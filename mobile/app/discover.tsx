@@ -3,7 +3,7 @@ import { Link, useRouter } from "expo-router"
 import { ChevronRight, Play, Search } from "lucide-react-native"
 import { ActivityIndicator, FlatList, Image, ImageBackground, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { fetchWorks, type PublicWork } from "../src/api"
+import { fetchDiscoverHeroImage, fetchWorks, type PublicWork } from "../src/api"
 import { useSession } from "../src/session"
 import { colors } from "../src/theme"
 
@@ -11,6 +11,7 @@ const DISCOVER_HERO_IMAGE = require("../assets/discover-hero.jpg")
 
 export default function HomeScreen() {
   const [works, setWorks] = useState<PublicWork[]>([])
+  const [discoverHeroImage, setDiscoverHeroImage] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [activeGenre, setActiveGenre] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +42,19 @@ export default function HomeScreen() {
       active = false
     }
   }, [])
+  useEffect(() => {
+    let active = true
+    void fetchDiscoverHeroImage()
+      .then((imageUrl) => {
+        if (active) setDiscoverHeroImage(imageUrl)
+      })
+      .catch((cause: unknown) => {
+        if (active) console.warn(cause instanceof Error ? cause.message : "Unable to load Discover background")
+      })
+    return () => {
+      active = false
+    }
+  }, [])
   const openWork = (work: PublicWork) => session ? router.push(`/work/${work.id}`) : router.push("/auth")
   const featuredWork = works[0]
   const categories = [...new Set(works.map((work) => work.genreName?.trim() || "Independent"))]
@@ -54,11 +68,11 @@ export default function HomeScreen() {
       style={styles.screen}
       data={loading || error ? [] : visibleWorks}
       keyExtractor={(work) => String(work.id)}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void loadWorks(query) }} tintColor={colors.rust} />}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void loadWorks(query); void fetchDiscoverHeroImage().then(setDiscoverHeroImage).catch((cause: unknown) => console.warn(cause instanceof Error ? cause.message : "Unable to load Discover background")) }} tintColor={colors.rust} />}
       contentContainerStyle={styles.list}
       ListHeaderComponent={
         <View>
-          <ImageBackground source={DISCOVER_HERO_IMAGE} imageStyle={styles.introHeroImage} style={[styles.introHero, { paddingTop: insets.top + 15 }]}>
+          <ImageBackground source={discoverHeroImage ? { uri: discoverHeroImage } : DISCOVER_HERO_IMAGE} imageStyle={styles.introHeroImage} style={[styles.introHero, { paddingTop: insets.top + 15 }]}>
             <View style={styles.topBar}>
               <Text style={styles.greeting}>Hi {firstName}!</Text>
               {session ? (

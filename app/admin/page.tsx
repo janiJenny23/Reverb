@@ -5,6 +5,7 @@ import {
   Disc3,
   FolderKanban,
   Headphones,
+  Image,
   Music2,
   Tags,
   UsersRound,
@@ -142,6 +143,7 @@ export default async function AdminPage() {
             <div className="mt-4 grid grid-cols-2 gap-2">
               <QuickAction href="/admin/users" icon={UsersRound} label="Manage users" />
               <QuickAction href="/admin/works" icon={Music2} label="Manage works" />
+              <QuickAction href="/admin/discover" icon={Image} label="Manage Discover" />
               <QuickAction href="/admin/genres" icon={Tags} label="Manage genres" />
               <QuickAction href="/admin/reports" icon={AlertTriangle} label="View reports" />
             </div>

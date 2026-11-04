@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getFeaturedWorks, searchWorks } from "@/app/actions/discover"
+import { getFeaturedWorks, searchWorks } from "@/modules/discovery"
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? ""

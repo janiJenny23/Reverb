@@ -145,9 +145,20 @@ export const report = pgTable("report", {
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
 })
 
+export const discoverHero = pgTable("discover_content", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull().default("Discover background"),
+  description: text("description"),
+  imageUrl: text("imageUrl").notNull(),
+  status: text("status").notNull().default("PUBLISHED"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+})
+
 export type Work = typeof work.$inferSelect
 export type Project = typeof project.$inferSelect
 export type Genre = typeof genre.$inferSelect
 export type MusicianProfile = typeof musicianProfile.$inferSelect
 export type User = typeof user.$inferSelect
 export type Report = typeof report.$inferSelect
+export type DiscoverHero = typeof discoverHero.$inferSelect

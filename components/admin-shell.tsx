@@ -7,6 +7,7 @@ import {
   AudioLines,
   ChevronRight,
   Flag,
+  Image,
   LayoutDashboard,
   Menu,
   Music2,
@@ -20,6 +21,7 @@ const navigation = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: UsersRound },
   { href: "/admin/works", label: "Works", icon: Music2 },
+  { href: "/admin/discover", label: "Discover", icon: Image },
   { href: "/admin/genres", label: "Genres", icon: Tags },
   { href: "/admin/reports", label: "Reports", icon: Flag },
 ]

@@ -1,10 +1,8 @@
 import { betterAuth } from "better-auth"
 import { pool } from "@/lib/db"
-import { db } from "@/lib/db"
-import { user } from "@/lib/db/schema"
-import { eq } from "drizzle-orm"
 import { ensureSuperAdminBootstrap } from "@/lib/bootstrap-admin"
 import { getAuthTrustedOrigins } from "@/lib/auth-origins"
+import { isIdentityUserBanned } from "@/modules/identity"
 
 const baseUrl =
   process.env.BETTER_AUTH_URL ??
@@ -67,8 +65,7 @@ export const auth = betterAuth({
     session: {
       create: {
         before: async (session) => {
-          const [account] = await db.select({ banned: user.banned }).from(user).where(eq(user.id, session.userId)).limit(1)
-          return account?.banned ? false : undefined
+          return (await isIdentityUserBanned(session.userId)) ? false : undefined
         },
       },
     },
