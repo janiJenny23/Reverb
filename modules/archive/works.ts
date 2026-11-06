@@ -2,7 +2,7 @@ import { db } from "@/lib/db"
 import type { DbExecutor } from "@/lib/db"
 import { project, work } from "@/lib/db/schema"
 import { validateRequiredWorkFields } from "@/lib/domain-rules"
-import { and, desc, eq, ilike, inArray, isNotNull, or, sql } from "drizzle-orm"
+import { and, desc, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-orm"
 import { getGenreNameById, getGenreNamesByIds } from "@/modules/genres"
 import { getAccountNamesByIds } from "@/modules/identity"
 import { getMusicianDisplayNames } from "@/modules/profiles"
@@ -44,6 +44,8 @@ export type WorkLabel = {
   title: string
   artist: string
 }
+
+export const WORK_DELETION_PENDING = "DELETION_PENDING"
 
 type AdminWorkRow = {
   id: number
@@ -324,7 +326,18 @@ export async function updateWork(userId: string, id: number, input: WorkInput) {
 }
 
 export async function deleteWork(userId: string, id: number) {
-  await db.delete(work).where(and(eq(work.id, id), eq(work.userId, userId)))
+  const [deleted] = await db
+    .delete(work)
+    .where(and(eq(work.id, id), eq(work.userId, userId), ne(work.status, WORK_DELETION_PENDING)))
+    .returning({ id: work.id })
+  if (deleted) return
+
+  const [pendingWork] = await db
+    .select({ id: work.id })
+    .from(work)
+    .where(and(eq(work.id, id), eq(work.userId, userId), eq(work.status, WORK_DELETION_PENDING)))
+    .limit(1)
+  if (pendingWork) throw new Error("This work is pending permanent deletion and cannot be deleted here")
 }
 
 export async function deleteWorkForAdmin(id: number, executor: DbExecutor = db) {
@@ -332,7 +345,28 @@ export async function deleteWorkForAdmin(id: number, executor: DbExecutor = db) 
 }
 
 export async function setWorkStatus(id: number, status: string, executor: DbExecutor = db) {
-  await executor.update(work).set({ status, updatedAt: new Date() }).where(eq(work.id, id))
+  const [updated] = await executor
+    .update(work)
+    .set({ status, updatedAt: new Date() })
+    .where(and(eq(work.id, id), ne(work.status, WORK_DELETION_PENDING)))
+    .returning({ id: work.id })
+  if (updated) return
+
+  const [pendingWork] = await executor
+    .select({ id: work.id })
+    .from(work)
+    .where(and(eq(work.id, id), eq(work.status, WORK_DELETION_PENDING)))
+    .limit(1)
+  if (pendingWork) throw new Error("This work is pending permanent deletion and its status cannot be changed")
+}
+
+export async function markWorkDeletionPending(id: number, executor: DbExecutor = db) {
+  const [marked] = await executor
+    .update(work)
+    .set({ status: WORK_DELETION_PENDING, updatedAt: new Date() })
+    .where(eq(work.id, id))
+    .returning({ id: work.id })
+  return Boolean(marked)
 }
 
 export async function clearWorkGenreReferences(genreId: number, executor: DbExecutor = db) {

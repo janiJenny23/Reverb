@@ -11,6 +11,7 @@ import {
   getAllWorks as getAllWorksFromModule,
   getRecentAdminWorks as getRecentAdminWorksFromModule,
   getGenresWithCounts as getGenresWithCountsFromModule,
+  retryWorkDeletion as retryWorkDeletionInModule,
   setWorkStatus as setWorkStatusInModule,
 } from "@/modules/admin"
 import {
@@ -76,9 +77,21 @@ export async function setWorkStatus(workId: number, status: string) {
 
 export async function adminDeleteWork(workId: number) {
   await requireRole(["SUPER_ADMIN"])
-  await adminDeleteWorkInModule(workId)
+  try {
+    await adminDeleteWorkInModule(workId)
+  } finally {
+    revalidatePath("/admin/works")
+    revalidatePath("/admin/genres")
+  }
+}
+
+export async function retryWorkDeletion(workId: number) {
+  await requireRole(["SUPER_ADMIN"])
+  if (!Number.isSafeInteger(workId) || workId <= 0) {
+    throw new Error("Work ID must be a positive integer")
+  }
+  await retryWorkDeletionInModule(workId)
   revalidatePath("/admin/works")
-  revalidatePath("/admin/genres")
 }
 
 export async function getGenresWithCounts() {

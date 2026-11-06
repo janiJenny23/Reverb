@@ -27,6 +27,7 @@ const tableOwners: Record<string, string> = {
   favorite: "library",
   report: "moderation",
   discoverHero: "discovery-content",
+  outboxEvent: "admin",
 }
 const allowedCrossModuleReads: Record<string, readonly string[]> = {
   "modules/discovery/index.ts": ["genre", "musicianProfile", "project", "work"],

@@ -13,7 +13,9 @@ Reverb is a digital music archive for musicians to manage and publish their work
 
 ## Architecture
 
-The web application and API run in a single Next.js backend. The mobile app is a separate client of that API. The backend uses PostgreSQL for application data and Vercel Blob for uploaded media.
+The web application and API run in a single Next.js backend. The mobile app is a separate client of that API. The backend uses PostgreSQL for application data and Vercel Blob for uploaded media. The outbox worker has its own container build target and can be deployed separately, but it still shares this repository's modules and PostgreSQL database; it is a deployment boundary, not yet an independently owned domain microservice.
+
+Admin work deletion is staged through a PostgreSQL transactional outbox: the work is marked `DELETION_PENDING` and its cleanup event is recorded atomically. Run `pnpm worker:outbox` alongside the web app to process queued deletions. Failed cleanups are retried up to five times with exponential backoff, then shown as failed on the admin works page with an error and a manual retry action. Processing is idempotent and can recover events left locked by a crashed worker. The worker also purges completed outbox events older than 30 days, running the cleanup at startup and then daily; failed events are retained until resolved.
 
 ## Technology
 
@@ -60,6 +62,24 @@ pnpm db:check
 pnpm build
 pnpm start
 ```
+
+### Separate web and worker containers
+
+The web server and outbox worker can be built and deployed independently from the same commit:
+
+```bash
+docker build --target web -t reverb-web .
+docker build --target outbox-worker -t reverb-outbox-worker .
+```
+
+Run them with the same runtime environment file:
+
+```bash
+docker run --rm --env-file .env.local -p 3000:3000 reverb-web
+docker run --rm --env-file .env.local reverb-outbox-worker
+```
+
+`DATABASE_URL` must be reachable from inside the container; `localhost` refers to the container itself. Keep `.env.local` out of image builds and source control. Apply database migrations separately before deploying a new version.
 
 The isolated E2E runner requires a local PostgreSQL account that can create and drop temporary test databases. Browser tests use Playwright Chromium; install it once with `pnpm exec playwright install chromium`.
 

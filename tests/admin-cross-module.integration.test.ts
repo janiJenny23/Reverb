@@ -21,10 +21,17 @@ databaseDescribe("Cross-module database mutations", () => {
   let pool: typeof import("@/lib/db").pool
   let tables: typeof import("@/lib/db/schema")
   let adminDeleteWork: typeof import("@/modules/admin").adminDeleteWork
+  let getAllAdminWorks: typeof import("@/modules/admin").getAllWorks
+  let processNextOutboxEvent: typeof import("@/modules/admin").processNextOutboxEvent
+  let retryWorkDeletion: typeof import("@/modules/admin").retryWorkDeletion
+  let maxOutboxAttempts: typeof import("@/modules/admin").MAX_OUTBOX_ATTEMPTS
+  let purgeCompletedOutboxEvents: typeof import("@/modules/admin").purgeCompletedOutboxEvents
+  let completedOutboxRetentionDays: typeof import("@/modules/admin").COMPLETED_OUTBOX_RETENTION_DAYS
   let deleteGenre: typeof import("@/modules/admin").deleteGenre
   let hideReportedWork: typeof import("@/modules/moderation").hideReportedWork
   let saveMusicianProfile: (typeof import("@/modules/profiles"))["saveMusicianProfile"]
   let deleteProject: (typeof import("@/modules/archive"))["deleteProject"]
+  let setWorkStatus: (typeof import("@/modules/archive"))["setWorkStatus"]
   let setUserRole: (typeof import("@/modules/identity"))["setUserRole"]
   let setUserBanned: (typeof import("@/modules/identity"))["setUserBanned"]
   const workIds: number[] = []
@@ -57,10 +64,17 @@ databaseDescribe("Cross-module database mutations", () => {
     pool = databaseModule.pool
     tables = schemaModule
     adminDeleteWork = adminModule.adminDeleteWork
+    getAllAdminWorks = adminModule.getAllWorks
+    processNextOutboxEvent = adminModule.processNextOutboxEvent
+    retryWorkDeletion = adminModule.retryWorkDeletion
+    maxOutboxAttempts = adminModule.MAX_OUTBOX_ATTEMPTS
+    purgeCompletedOutboxEvents = adminModule.purgeCompletedOutboxEvents
+    completedOutboxRetentionDays = adminModule.COMPLETED_OUTBOX_RETENTION_DAYS
     deleteGenre = adminModule.deleteGenre
     hideReportedWork = moderationModule.hideReportedWork
     saveMusicianProfile = profilesModule.saveMusicianProfile
     deleteProject = archiveModule.deleteProject
+    setWorkStatus = archiveModule.setWorkStatus
     setUserRole = identityModule.setUserRole
     setUserBanned = identityModule.setUserBanned
   })
@@ -76,6 +90,7 @@ databaseDescribe("Cross-module database mutations", () => {
       await pool.query(`DROP TABLE IF EXISTS public."${tableName}"`)
     }
     for (const workId of workIds.splice(0)) {
+      await database.delete(tables.outboxEvent).where(eq(tables.outboxEvent.aggregateId, workId))
       await database.delete(tables.favorite).where(eq(tables.favorite.workId, workId))
       await database.delete(tables.report).where(eq(tables.report.workId, workId))
       await database.delete(tables.work).where(eq(tables.work.id, workId))
@@ -108,6 +123,13 @@ databaseDescribe("Cross-module database mutations", () => {
     })
 
     await adminDeleteWork(workId)
+    const [queuedEvent] = await database
+      .select({ status: tables.outboxEvent.status, availableAt: tables.outboxEvent.availableAt })
+      .from(tables.outboxEvent)
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+    expect(queuedEvent).toMatchObject({ status: "PENDING" })
+    expect(queuedEvent.availableAt.getTime()).toBeLessThanOrEqual(Date.now())
+    expect(await processNextOutboxEvent()).toBe(true)
 
     const [works, favorites, reports] = await Promise.all([
       database.select({ id: tables.work.id }).from(tables.work).where(eq(tables.work.id, workId)),
@@ -126,7 +148,7 @@ databaseDescribe("Cross-module database mutations", () => {
     expect(reports).toEqual([])
   })
 
-  it("rolls back favorite deletion when report cleanup fails", async () => {
+  it("keeps a failed deletion pending and completes it when retried", async () => {
     const workId = await createWork()
     await database.insert(tables.favorite).values({
       userId: `integration-${randomUUID()}`,
@@ -139,10 +161,11 @@ databaseDescribe("Cross-module database mutations", () => {
     const guardTable = createGuardTableName()
     await createReportDeleteGuard(guardTable, createdReport.id)
 
-    await expect(adminDeleteWork(workId)).rejects.toBeDefined()
+    await expect(adminDeleteWork(workId)).resolves.toBeUndefined()
+    await expect(processNextOutboxEvent()).rejects.toBeDefined()
 
-    const [works, favorites, reports] = await Promise.all([
-      database.select({ id: tables.work.id }).from(tables.work).where(eq(tables.work.id, workId)),
+    const [works, favorites, reports, events] = await Promise.all([
+      database.select({ status: tables.work.status }).from(tables.work).where(eq(tables.work.id, workId)),
       database
         .select({ id: tables.favorite.id })
         .from(tables.favorite)
@@ -151,11 +174,185 @@ databaseDescribe("Cross-module database mutations", () => {
         .select({ id: tables.report.id })
         .from(tables.report)
         .where(eq(tables.report.id, createdReport.id)),
+      database
+        .select({ status: tables.outboxEvent.status, attempts: tables.outboxEvent.attempts, lastError: tables.outboxEvent.lastError })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, workId)),
     ])
 
-    expect(works).toHaveLength(1)
-    expect(favorites).toHaveLength(1)
+    expect(works).toEqual([{ status: "DELETION_PENDING" }])
+    expect(favorites).toEqual([])
     expect(reports).toHaveLength(1)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ status: "PENDING", attempts: 1 })
+    expect(events[0].lastError).toContain('delete from "report"')
+
+    await expect(setWorkStatus(workId, "PUBLISHED")).rejects.toThrow("pending permanent deletion")
+    await pool.query(`DROP TABLE public."${guardTable}"`)
+    await database
+      .update(tables.outboxEvent)
+      .set({ availableAt: new Date(0) })
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+    await expect(processNextOutboxEvent()).resolves.toBe(true)
+
+    const [remainingWorks, remainingReports, completedEvents] = await Promise.all([
+      database.select({ id: tables.work.id }).from(tables.work).where(eq(tables.work.id, workId)),
+      database.select({ id: tables.report.id }).from(tables.report).where(eq(tables.report.id, createdReport.id)),
+      database
+        .select({ status: tables.outboxEvent.status })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, workId)),
+    ])
+    expect(remainingWorks).toEqual([])
+    expect(remainingReports).toEqual([])
+    expect(completedEvents).toEqual([{ status: "COMPLETED" }])
+  })
+
+  it("reclaims a deletion event left locked by a stopped worker", async () => {
+    const workId = await createWork()
+    await adminDeleteWork(workId)
+    await database
+      .update(tables.outboxEvent)
+      .set({ status: "PROCESSING", lockedAt: new Date(Date.now() - 120_000) })
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+
+    await expect(processNextOutboxEvent()).resolves.toBe(true)
+
+    const [remainingWorks, completedEvents] = await Promise.all([
+      database.select({ id: tables.work.id }).from(tables.work).where(eq(tables.work.id, workId)),
+      database
+        .select({ status: tables.outboxEvent.status })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, workId)),
+    ])
+    expect(remainingWorks).toEqual([])
+    expect(completedEvents).toEqual([{ status: "COMPLETED" }])
+  })
+
+  it("marks exhausted deletions failed and allows an admin retry", async () => {
+    const workId = await createWork()
+    const [createdReport] = await database
+      .insert(tables.report)
+      .values({ workId, reason: "Integration retry limit test" })
+      .returning({ id: tables.report.id })
+    const guardTable = createGuardTableName()
+    await createReportDeleteGuard(guardTable, createdReport.id)
+
+    await adminDeleteWork(workId)
+    for (let attempt = 0; attempt < maxOutboxAttempts; attempt += 1) {
+      if (attempt > 0) {
+        await database
+          .update(tables.outboxEvent)
+          .set({ availableAt: new Date(0) })
+          .where(eq(tables.outboxEvent.aggregateId, workId))
+      }
+      await expect(processNextOutboxEvent()).rejects.toBeDefined()
+    }
+
+    const [failedEvent] = await database
+      .select({
+        status: tables.outboxEvent.status,
+        attempts: tables.outboxEvent.attempts,
+        lastError: tables.outboxEvent.lastError,
+      })
+      .from(tables.outboxEvent)
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+    expect(failedEvent).toMatchObject({ status: "FAILED", attempts: maxOutboxAttempts })
+    expect(failedEvent.lastError).toContain('delete from "report"')
+    const failedWork = (await getAllAdminWorks()).find((work) => work.id === workId)
+    expect(failedWork?.deletionFailure).toMatchObject({
+      attempts: maxOutboxAttempts,
+      lastError: failedEvent.lastError,
+    })
+    await expect(processNextOutboxEvent()).resolves.toBe(false)
+
+    await pool.query(`DROP TABLE public."${guardTable}"`)
+    await retryWorkDeletion(workId)
+    const [queuedEvent] = await database
+      .select({ status: tables.outboxEvent.status, attempts: tables.outboxEvent.attempts })
+      .from(tables.outboxEvent)
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+    expect(queuedEvent).toEqual({ status: "PENDING", attempts: 0 })
+    await expect(processNextOutboxEvent()).resolves.toBe(true)
+
+    const [remainingWork] = await database
+      .select({ id: tables.work.id })
+      .from(tables.work)
+      .where(eq(tables.work.id, workId))
+    expect(remainingWork).toBeUndefined()
+  })
+
+  it("marks an exhausted event failed when its worker lease expires", async () => {
+    const workId = await createWork()
+    await adminDeleteWork(workId)
+    await database
+      .update(tables.outboxEvent)
+      .set({
+        status: "PROCESSING",
+        attempts: maxOutboxAttempts,
+        lockedAt: new Date(Date.now() - 120_000),
+      })
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+
+    await expect(processNextOutboxEvent()).resolves.toBe(false)
+
+    const [event] = await database
+      .select({
+        status: tables.outboxEvent.status,
+        attempts: tables.outboxEvent.attempts,
+        lastError: tables.outboxEvent.lastError,
+      })
+      .from(tables.outboxEvent)
+      .where(eq(tables.outboxEvent.aggregateId, workId))
+    expect(event).toEqual({
+      status: "FAILED",
+      attempts: maxOutboxAttempts,
+      lastError: "Worker lease expired after maximum attempts",
+    })
+  })
+
+  it("purges only completed outbox events older than the retention period", async () => {
+    const oldWorkId = await createWork()
+    const recentWorkId = await createWork()
+    const failedWorkId = await createWork()
+    await adminDeleteWork(oldWorkId)
+    await adminDeleteWork(recentWorkId)
+    await adminDeleteWork(failedWorkId)
+    await expect(processNextOutboxEvent()).resolves.toBe(true)
+    await expect(processNextOutboxEvent()).resolves.toBe(true)
+    await database
+      .update(tables.outboxEvent)
+      .set({
+        updatedAt: new Date(Date.now() - (completedOutboxRetentionDays + 1) * 24 * 60 * 60 * 1_000),
+      })
+      .where(eq(tables.outboxEvent.aggregateId, oldWorkId))
+    await database
+      .update(tables.outboxEvent)
+      .set({
+        status: "FAILED",
+        updatedAt: new Date(Date.now() - (completedOutboxRetentionDays + 1) * 24 * 60 * 60 * 1_000),
+      })
+      .where(eq(tables.outboxEvent.aggregateId, failedWorkId))
+
+    await expect(purgeCompletedOutboxEvents()).resolves.toBe(1)
+
+    const [oldEvents, recentEvents, failedEvents] = await Promise.all([
+      database
+        .select({ id: tables.outboxEvent.id })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, oldWorkId)),
+      database
+        .select({ status: tables.outboxEvent.status })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, recentWorkId)),
+      database
+        .select({ status: tables.outboxEvent.status })
+        .from(tables.outboxEvent)
+        .where(eq(tables.outboxEvent.aggregateId, failedWorkId)),
+    ])
+    expect(oldEvents).toEqual([])
+    expect(recentEvents).toEqual([{ status: "COMPLETED" }])
+    expect(failedEvents).toEqual([{ status: "FAILED" }])
   })
 
   it("removes a genre and clears its references from existing works", async () => {

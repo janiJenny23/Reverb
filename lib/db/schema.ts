@@ -7,6 +7,7 @@ import {
   integer,
   date,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core"
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,22 @@ export const discoverHero = pgTable("discover_content", {
   updatedAt: timestamp("updatedAt").notNull().defaultNow(),
 })
 
+export const outboxEvent = pgTable("outbox_event", {
+  id: serial("id").primaryKey(),
+  eventType: text("eventType").notNull(),
+  aggregateId: integer("aggregateId").notNull(),
+  status: text("status").notNull().default("PENDING"),
+  attempts: integer("attempts").notNull().default(0),
+  availableAt: timestamp("availableAt", { withTimezone: true }).notNull().defaultNow(),
+  lockedAt: timestamp("lockedAt", { withTimezone: true }),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("outbox_event_type_aggregate_unique").on(table.eventType, table.aggregateId),
+  index("outbox_status_available_idx").on(table.status, table.availableAt),
+])
+
 export type Work = typeof work.$inferSelect
 export type Project = typeof project.$inferSelect
 export type Genre = typeof genre.$inferSelect
@@ -162,3 +179,4 @@ export type MusicianProfile = typeof musicianProfile.$inferSelect
 export type User = typeof user.$inferSelect
 export type Report = typeof report.$inferSelect
 export type DiscoverHero = typeof discoverHero.$inferSelect
+export type OutboxEvent = typeof outboxEvent.$inferSelect
